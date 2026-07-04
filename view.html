@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<!--
+  Invora — hosted invoice viewer.
+  Host this file on your domain so shared links render the invoice INLINE
+  (works on Android too) with Print + Download, zoom, and crisp rendering.
+
+  Shared link:  https://<your-domain>/view.html?token=<token>
+  Update FUNCTIONS_BASE below if the Supabase project changes.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+  <title>Invoice · Invora</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="preconnect" href="https://ojerckbyvevgaihlhwab.functions.supabase.co">
+  <link rel="preconnect" href="https://ojerckbyvevgaihlhwab.supabase.co">
+  <style>
+    :root { --navy:#112844; --cream:#F4EFE4; --gold:#D7A837; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:#e9edf1;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+      color:var(--navy); }
+    header { position:sticky; top:0; z-index:10; display:flex; align-items:center;
+      justify-content:space-between; gap:10px; padding:12px 14px; background:var(--navy);
+      color:var(--cream); box-shadow:0 1px 8px rgba(0,0,0,.18); }
+    .brand { display:flex; align-items:center; gap:9px; font-weight:800; font-size:18px; letter-spacing:-.3px; }
+    .dot { width:22px; height:22px; border-radius:6px; background:var(--cream); display:inline-block; }
+    .actions { display:flex; align-items:center; gap:8px; }
+    .btn { text-decoration:none; font-weight:700; font-size:14px; padding:9px 15px;
+      border-radius:10px; white-space:nowrap; cursor:pointer; border:0; font-family:inherit; }
+    .btn:active { transform:translateY(1px); }
+    .dl { background:var(--gold); color:#3a2c05; }
+    .ghost { background:transparent; color:var(--cream); border:1.5px solid rgba(244,239,228,.5); }
+    main { max-width:900px; margin:0 auto; padding:16px 10px 84px; }
+    #pages { overflow-x:auto; }
+    .page { position:relative; margin:0 auto 14px; background:#fff; border-radius:6px;
+      box-shadow:0 2px 12px rgba(17,40,68,.14); overflow:hidden; }
+    .page canvas { display:block; }
+    .textLayer { position:absolute; inset:0; overflow:hidden; line-height:1; opacity:1; text-align:initial; }
+    .textLayer span, .textLayer br { color:transparent; position:absolute; white-space:pre; cursor:text; transform-origin:0 0; }
+    .textLayer ::selection { background:rgba(37,150,190,.35); }
+    .retry { margin-top:16px; background:var(--navy); color:#fff; border:0; font-weight:700;
+      font-size:14px; padding:10px 18px; border-radius:10px; cursor:pointer; font-family:inherit; }
+    #status { text-align:center; padding:70px 20px; color:#5b6b7b; font-size:15px; }
+    .spinner { width:34px; height:34px; border:3px solid #cfd8e3; border-top-color:var(--navy);
+      border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 16px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .pct { font-variant-numeric:tabular-nums; font-weight:600; color:var(--navy); }
+    .err { max-width:340px; margin:0 auto; }
+    .err svg { margin-bottom:14px; }
+    .err-t { font-size:18px; font-weight:700; color:var(--navy); margin-bottom:6px; }
+    .err-m { font-size:14px; line-height:21px; color:#5b6b7b; }
+    /* Floating zoom pill */
+    .zoombar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:20;
+      display:flex; align-items:center; gap:2px; background:var(--navy); color:#fff;
+      border-radius:999px; padding:5px; box-shadow:0 12px 30px -10px rgba(17,40,68,.6); }
+    .zoombar button { background:transparent; border:0; color:#fff; font-size:18px; font-weight:700;
+      width:40px; height:38px; border-radius:999px; cursor:pointer; font-family:inherit; }
+    .zoombar button:hover { background:rgba(255,255,255,.12); }
+    .zoombar .z-lvl { min-width:58px; text-align:center; font-size:13px; font-weight:700;
+      font-variant-numeric:tabular-nums; }
+    footer { text-align:center; color:#8a97a5; font-size:12px; padding:2px 0 26px; }
+    @media print {
+      header, footer, .zoombar { display:none !important; }
+      html, body { background:#fff; }
+      main { max-width:none; padding:0; }
+      #pages { overflow:visible; }
+      .page { box-shadow:none !important; border-radius:0 !important; margin:0 auto !important;
+        width:100% !important; height:auto !important; page-break-after:always; overflow:visible; }
+      .page canvas { width:100% !important; height:auto !important; }
+      .textLayer { display:none !important; }
+    }
+    @media (prefers-reduced-motion: reduce){ .spinner{ animation:none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand"><span class="dot"></span>Invora</span>
+    <span class="actions">
+      <button id="print" class="btn ghost" style="display:none">Print</button>
+      <a id="download" class="btn dl" style="display:none" href="#" rel="noopener">Download</a>
+    </span>
+  </header>
+  <main>
+    <div id="status"><div class="spinner"></div>Loading invoice… <span class="pct" id="pct"></span></div>
+    <div id="pages"></div>
+  </main>
+  <div class="zoombar" id="zoombar" style="display:none" aria-label="Zoom">
+    <button data-z="out" aria-label="Zoom out">−</button>
+    <button data-z="fit" class="z-lvl" id="zlvl" aria-label="Fit width">100%</button>
+    <button data-z="in" aria-label="Zoom in">+</button>
+  </div>
+  <footer>Sent with Invora · Invoices made effortless</footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    // Update this if the Supabase project ref changes.
+    const FUNCTIONS_BASE = 'https://ojerckbyvevgaihlhwab.functions.supabase.co';
+
+    const statusEl = document.getElementById('status');
+    const pctEl = document.getElementById('pct');
+    const pagesEl = document.getElementById('pages');
+    const dlEl = document.getElementById('download');
+    const printEl = document.getElementById('print');
+    const zoombar = document.getElementById('zoombar');
+    const zlvl = document.getElementById('zlvl');
+
+    let pdfDoc = null, zoom = 1, seq = 0, lastW = 0;
+
+    const DOC_ICON = '<svg width="46" height="46" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="#98a4b2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+      + '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>'
+      + '<path d="M14 3v5h5"/><path d="M9.5 13l5 5M14.5 13l-5 5"/></svg>';
+
+    function fail(kind) {
+      dlEl.style.display = 'none'; printEl.style.display = 'none'; zoombar.style.display = 'none';
+      let title, msg;
+      if (kind === 'invalid') { title = 'Invalid link';
+        msg = "This invoice link doesn't look right. Please check the URL, or ask the sender to share it again."; }
+      else if (kind === 'load') { title = "Couldn't load this invoice";
+        msg = 'The link may have expired. Please ask the sender for a new one.'; }
+      else { title = 'Invoice not available';
+        msg = 'This link may have expired or been revoked. Please ask the sender to share it again.'; }
+      statusEl.style.display = '';
+      statusEl.innerHTML = '<div class="err">' + DOC_ICON +
+        '<div class="err-t">' + title + '</div><div class="err-m">' + msg + '</div>' +
+        '<button class="retry" onclick="location.reload()">Try again</button></div>';
+    }
+
+    // Width (CSS px) to render a page at, before zoom.
+    function baseWidth() { return Math.min(pagesEl.clientWidth || 800, 1100); }
+
+    // Render every page at the current width × zoom × device pixel ratio (crisp).
+    async function renderAll() {
+      if (!pdfDoc) return;
+      const my = ++seq;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const cssW = Math.round(baseWidth() * zoom);
+      pagesEl.innerHTML = '';
+      for (let n = 1; n <= pdfDoc.numPages; n++) {
+        if (my !== seq) return;                       // superseded by a newer render
+        const page = await pdfDoc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const cssScale = cssW / base.width;
+        const cssH = Math.round(base.height * cssScale);
+        const vp = page.getViewport({ scale: cssScale * dpr });
+
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'page';
+        pageDiv.style.width = cssW + 'px';
+        pageDiv.style.height = cssH + 'px';
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(vp.width);
+        canvas.height = Math.floor(vp.height);
+        canvas.style.width = cssW + 'px';
+        canvas.style.height = cssH + 'px';
+        pageDiv.appendChild(canvas);
+        if (my !== seq) return;
+        pagesEl.appendChild(pageDiv);
+
+        await page.render({
+          canvasContext: canvas.getContext('2d', { alpha: false }),
+          viewport: vp
+        }).promise;
+
+        // Selectable / searchable / accessible text layer (best-effort — never
+        // blocks the visual render if the API shape differs).
+        try {
+          const tc = await page.getTextContent();
+          if (my !== seq) return;
+          const tl = document.createElement('div');
+          tl.className = 'textLayer';
+          tl.style.width = cssW + 'px';
+          tl.style.height = cssH + 'px';
+          tl.style.setProperty('--scale-factor', cssScale);
+          pageDiv.appendChild(tl);
+          const task = pdfjsLib.renderTextLayer({
+            textContentSource: tc,
+            container: tl,
+            viewport: page.getViewport({ scale: cssScale })
+          });
+          if (task && task.promise) await task.promise;
+        } catch (e) { /* text layer optional */ }
+      }
+    }
+
+    function setZoom(z) {
+      zoom = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+      zlvl.textContent = Math.round(zoom * 100) + '%';
+      renderAll();
+    }
+
+    async function loadPdf(url) {
+      try {
+        const task = pdfjsLib.getDocument({ url: url });
+        task.onProgress = function (p) { if (p && p.total) pctEl.textContent = Math.round(p.loaded / p.total * 100) + '%'; };
+        pdfDoc = await task.promise;
+        statusEl.style.display = 'none';
+        printEl.style.display = '';
+        zoombar.style.display = '';
+        lastW = baseWidth();
+        await renderAll();
+      } catch (e) { fail('load'); }
+    }
+
+    // Re-render on resize / rotation (debounced, only when width actually changed).
+    let rt;
+    window.addEventListener('resize', function () {
+      clearTimeout(rt);
+      rt = setTimeout(function () {
+        if (!pdfDoc) return;
+        const w = baseWidth();
+        if (Math.abs(w - lastW) > 4) { lastW = w; renderAll(); }
+      }, 250);
+    });
+
+    zoombar.addEventListener('click', function (e) {
+      const a = e.target.getAttribute('data-z');
+      if (a === 'in') setZoom(zoom + 0.25);
+      else if (a === 'out') setZoom(zoom - 0.25);
+      else if (a === 'fit') setZoom(1);
+    });
+    printEl.addEventListener('click', function () { window.print(); });
+
+    // Boot
+    const token = new URLSearchParams(location.search).get('token');
+    if (!token) {
+      fail('invalid');
+    } else {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      fetch(FUNCTIONS_BASE + '/view-invoice?format=json&token=' + encodeURIComponent(token))
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+          if (!data || !data.url) return fail('unavailable');
+          dlEl.href = data.downloadUrl || data.url;
+          dlEl.style.display = '';
+          return loadPdf(data.url);
+        })
+        .catch(function () { fail('unavailable'); });
+    }
+  </script>
+</body>
+</html>
